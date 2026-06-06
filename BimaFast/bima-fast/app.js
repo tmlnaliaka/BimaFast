@@ -35,7 +35,8 @@ const defaultState = {
   },
   gemini: {
     apiKey: '',
-    mode: 'mock',               // 'mock' | 'live'
+    mode: 'offline',               // 'offline' | 'live'
+    modelName: 'gemini-2.0-flash',
   },
   chatHistory: [],              // AI chat message history
 };
@@ -74,6 +75,19 @@ function deepMerge(target, source) {
 // PORTAL NAVIGATION
 // ============================================================
 function switchPortal(portal) {
+  if (!Auth.isAuthenticated()) {
+    Auth.showLoginScreen();
+    return;
+  }
+  
+  const user = Auth.getCurrentUser();
+  
+  // Gate access based on role
+  if (user.role !== 'admin' && user.role !== portal) {
+    showGlobalToast(`Access Denied: Your role (${user.role}) cannot access the ${portal} portal.`, 'error');
+    return;
+  }
+  
   document.querySelectorAll('.portal').forEach(el => {
     el.classList.remove('active');
     el.classList.add('hidden');
@@ -82,10 +96,27 @@ function switchPortal(portal) {
     btn.classList.remove('active');
     btn.setAttribute('aria-pressed', 'false');
   });
-  document.getElementById(`portal-${portal}`).classList.add('active');
-  document.getElementById(`portal-${portal}`).classList.remove('hidden');
-  document.getElementById(`nav-${portal}`).classList.add('active');
-  document.getElementById(`nav-${portal}`).setAttribute('aria-pressed', 'true');
+  
+  // Update header navigation visibility based on role
+  const navRider = document.getElementById('nav-rider');
+  const navHospital = document.getElementById('nav-hospital');
+  const navAdmin = document.getElementById('nav-admin');
+  
+  if (navRider) navRider.style.display = (user.role === 'rider' || user.role === 'admin') ? 'flex' : 'none';
+  if (navHospital) navHospital.style.display = (user.role === 'hospital' || user.role === 'admin') ? 'flex' : 'none';
+  if (navAdmin) navAdmin.style.display = (user.role === 'admin') ? 'flex' : 'none';
+  
+  const targetPortal = document.getElementById(`portal-${portal}`);
+  if (targetPortal) {
+    targetPortal.classList.add('active');
+    targetPortal.classList.remove('hidden');
+  }
+  
+  const targetNav = document.getElementById(`nav-${portal}`);
+  if (targetNav) {
+    targetNav.classList.add('active');
+    targetNav.setAttribute('aria-pressed', 'true');
+  }
 }
 
 function switchPhoneTab(tab) {
@@ -102,55 +133,75 @@ function switchPhoneTab(tab) {
 // ============================================================
 // GEMINI API CONFIGURATION
 // ============================================================
-function toggleApiKeyModal() {
-  const modal = document.getElementById('api-key-modal');
-  modal.classList.toggle('hidden');
-  if (!modal.classList.contains('hidden')) {
-    document.getElementById('api-key-input').value = state.gemini.apiKey;
+let geminiApiKey = '';
+
+async function loadGeminiApiKey() {
+  try {
+    const key = await Auth.fetchGeminiKey();
+    geminiApiKey = key;
+    state.gemini.apiKey = key;
+    state.gemini.mode = key ? 'live' : 'offline';
+  } catch (err) {
+    console.warn('Could not load server-side Gemini API key:', err);
+    geminiApiKey = '';
+    state.gemini.apiKey = '';
+    state.gemini.mode = 'offline';
+  }
+  updateApiStatusUI();
+}
+
+async function fetchConfig() {
+  try {
+    const res = await fetch('/api/config');
+    if (res.ok) {
+      const config = await res.json();
+      state.admin.premiumRate = config.defaultPremium || state.admin.premiumRate;
+      state.admin.payoutPerNight = config.defaultPayoutNight || state.admin.payoutPerNight;
+      state.rider.phone = config.riderDefaultPhone || state.rider.phone;
+      state.gemini.modelName = config.geminiModel || state.gemini.modelName;
+    }
+  } catch (err) {
+    console.error('Failed to load server configurations:', err);
   }
 }
 
-function toggleApiKeyVisibility() {
-  const input = document.getElementById('api-key-input');
-  input.type = input.type === 'password' ? 'text' : 'password';
+function updateSessionHeaderUI(user) {
+  if (!user) return;
+  const avatar = document.getElementById('session-avatar');
+  const name = document.getElementById('session-name');
+  const role = document.getElementById('session-role');
+  
+  const initials = user.name
+    ? user.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()
+    : '??';
+  
+  if (avatar) avatar.textContent = initials;
+  if (name) name.textContent = user.name || 'User';
+  if (role) role.textContent = user.role ? user.role.toUpperCase() : 'USER';
 }
 
-function saveApiKey() {
-  const key = document.getElementById('api-key-input').value.trim();
-  if (key && !key.startsWith('AIza')) {
-    showGlobalToast('Invalid API key format (should start with AIza...)', 'error');
-    return;
-  }
-  state.gemini.apiKey = key;
-  state.gemini.mode = key ? 'live' : 'mock';
-  saveState();
-  updateApiStatusUI();
-  toggleApiKeyModal();
-  showGlobalToast(key ? 'Live Gemini AI activated!' : 'Switched to Mock Sandbox mode', key ? 'ai' : 'info');
-}
+window.onAuthSuccess = async (user) => {
+  updateSessionHeaderUI(user);
+  await fetchConfig();
+  await loadGeminiApiKey();
+  switchPortal(user.role);
+  renderAll();
+};
 
-function clearApiKey() {
-  document.getElementById('api-key-input').value = '';
-  state.gemini.apiKey = '';
-  state.gemini.mode = 'mock';
-  saveState();
-  updateApiStatusUI();
-  toggleApiKeyModal();
-  showGlobalToast('Mock Sandbox mode enabled.', 'info');
-}
+
 
 function updateApiStatusUI() {
   const isLive = state.gemini.mode === 'live';
   const dot = document.getElementById('api-status-dot');
   const label = document.getElementById('api-status-label');
-  dot.className = `api-dot ${isLive ? 'dot-live' : 'dot-mock'}`;
-  label.textContent = isLive ? 'Live AI' : 'Mock Mode';
+  if (dot) dot.className = `api-dot ${isLive ? 'dot-live' : 'dot-offline'}`;
+  if (label) label.textContent = isLive ? 'Live AI' : 'AI Offline';
   updateChatModeBadge();
-  // Also update audit mode tag
+  
   ['audit-mode-tag', 'risk-mode-tag'].forEach(id => {
     const el = document.getElementById(id);
     if (el) {
-      el.textContent = isLive ? 'LIVE' : 'MOCK';
+      el.textContent = isLive ? 'LIVE' : 'OFFLINE';
       el.className = `audit-mode-tag ${isLive ? 'live' : ''}`;
     }
   });
@@ -160,7 +211,7 @@ function updateChatModeBadge() {
   const badge = document.getElementById('chat-mode-badge');
   if (!badge) return;
   const isLive = state.gemini.mode === 'live';
-  badge.textContent = isLive ? 'LIVE' : 'MOCK';
+  badge.textContent = isLive ? 'LIVE' : 'OFFLINE';
   badge.className = `chat-mode-badge ${isLive ? 'live' : 'mock'}`;
 }
 
@@ -168,9 +219,11 @@ function updateChatModeBadge() {
 // GEMINI API CORE CALLER
 // ============================================================
 async function callGeminiAPI(prompt, systemInstruction = '', responseSchema = null) {
-  if (!state.gemini.apiKey) throw new Error('NO_API_KEY');
+  const keyToUse = geminiApiKey || state.gemini.apiKey;
+  if (!keyToUse) throw new Error('NO_API_KEY');
 
-  const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${state.gemini.apiKey}`;
+  const modelToUse = state.gemini.modelName || 'gemini-2.0-flash';
+  const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${keyToUse}`;
 
   const requestBody = {
     systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
@@ -201,100 +254,6 @@ async function callGeminiAPI(prompt, systemInstruction = '', responseSchema = nu
 }
 
 // ============================================================
-// MOCK AI SANDBOX ENGINE
-// ============================================================
-function mockClaimAudit(doctorNote) {
-  const note = doctorNote.toLowerCase();
-  const nightsMatch = note.match(/(\d+)\s*night/);
-  const nights = nightsMatch ? parseInt(nightsMatch[1]) : 3;
-
-  const diagnoses = ['malaria', 'accident', 'pneumonia', 'typhoid', 'fracture', 'appendicitis', 'maternity'];
-  const diagnosis = diagnoses.find(d => note.includes(d)) || 'Acute illness';
-
-  const nameMatch = doctorNote.match(/Patient\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/);
-  const patientName = nameMatch ? nameMatch[1] : 'John Kamau';
-
-  return {
-    patient_name: patientName,
-    diagnosis: diagnosis.charAt(0).toUpperCase() + diagnosis.slice(1),
-    admission_nights: nights,
-    clinical_indicators: ['Fever recorded', 'IV medication administered', 'Active clinical observation'],
-    claim_decision: 'APPROVED',
-    confidence_score: 0.94,
-    payout_amount_kes: nights * state.admin.payoutPerNight,
-    rejection_reason: null,
-  };
-}
-
-function mockChatResponse(userMessage, riderContext) {
-  const msg = userMessage.toLowerCase();
-  const isActive = Date.now() < state.rider.coverageExpiry;
-  const wallet = state.rider.wallet.toLocaleString();
-  const payout = state.admin.payoutPerNight.toLocaleString();
-  const premium = state.admin.premiumRate;
-
-  if (msg.includes('covered') || msg.includes('bima') || msg.includes('leo') || msg.includes('today')) {
-    return isActive
-      ? `Yes, your coverage is active. Your BimaFast policy expires in ${getCountdownString()}. If you are hospitalized now, you will receive KES ${payout} per night.`
-      : `Your cover has expired. Take a single ride (only KES ${premium} premium) to reactivate your coverage for the next 24 hours.`;
-  }
-  if (msg.includes('payout') || msg.includes('hospitalini') || msg.includes('malipo') || msg.includes('pay')) {
-    return `If you are admitted to an accredited hospital (such as Nairobi General) while your cover is active, you will receive a cash payout of KES ${payout} per night.`;
-  }
-  if (msg.includes('bei') || msg.includes('premium') || msg.includes('cost') || msg.includes('ngapi') || msg.includes('pesa')) {
-    return `The premium rate is KES ${premium} per ride or delivery, deducted automatically. Your wallet balance is KES ${wallet}.`;
-  }
-  if (msg.includes('wallet') || msg.includes('balance') || msg.includes('pesa zangu')) {
-    return `Your BimaFast wallet balance is KES ${wallet}. Total premiums paid: KES ${state.rider.totalPremiumsPaid}. Approved claims payouts are sent directly to this wallet.`;
-  }
-  if (msg.includes('claim') || msg.includes('madai') || msg.includes('hospital')) {
-    const claimCount = state.rider.claims.length;
-    return claimCount > 0
-      ? `You have ${claimCount} claims on file. You can check their status in the Claims tab. Approved claims: ${state.rider.claims.filter(c => c.status === 'approved').length}.`
-      : `You have no claims on record. If you are hospitalized, hospital staff can verify your active cover and process a payout instantly.`;
-  }
-  if (msg.includes('hello') || msg.includes('hi') || msg.includes('mambo') || msg.includes('sasa') || msg.includes('habari')) {
-    return `Hello! I am your Bima Assistant. Your coverage is currently ${isActive ? 'active' : 'expired'}. How can I assist you today?`;
-  }
-  return `I received your question: "${userMessage}". You can ask about: your coverage, premium rates, hospital payouts, or wallet balance. Your cover is currently ${isActive ? 'active' : 'expired'}.`;
-}
-
-function mockRiskAnalysis(metrics) {
-  const { lossRatio, premiumsCollected, benefitsPaid, activePolicies, premiumRate, payoutPerNight } = metrics;
-  const lr = parseFloat(lossRatio);
-
-  let riskLevel, headline, recommendations;
-
-  if (lr > 80) {
-    riskLevel = 'HIGH'; headline = 'HIGH RISK — Portfolio Under Financial Stress';
-    recommendations = [
-      { level: 'CRITICAL', text: `Loss ratio at ${lossRatio}% is dangerously high. The industry sustainable threshold is 65%. Immediate review required.` },
-      { level: 'URGENT', text: `Consider increasing premium from KES ${premiumRate} to KES ${Math.ceil(premiumRate * 1.4)} (+40%) to close the margin gap.` },
-      { level: 'ACTION', text: `Introduce a 3-day hospitalization waiting period to reduce opportunistic claims fraud.` },
-      { level: 'MONITOR', text: `Flag claims with >7 nights as requiring secondary verification via clinical records.` },
-    ];
-  } else if (lr > 50) {
-    riskLevel = 'MEDIUM'; headline = 'MODERATE RISK — Monitor and Optimize';
-    recommendations = [
-      { level: 'WATCH', text: `Loss ratio at ${lossRatio}% is acceptable but trending toward the caution zone (>65%). Monitor weekly.` },
-      { level: 'OPPORTUNITY', text: `Growing policy base of ${activePolicies} active policies. Consider a referral incentive (KES 50 bonus) to accelerate adoption.` },
-      { level: 'OPTIMIZE', text: `At KES ${payoutPerNight}/night payout, you have room for a KES 500 wellness top-up reward for claim-free quarters.` },
-      { level: 'EXPAND', text: `Partner with 2-3 more hospitals in Mombasa and Kisumu to grow the network and geographic coverage.` },
-    ];
-  } else {
-    riskLevel = 'LOW'; headline = 'HEALTHY PORTFOLIO — Growth Mode Recommended';
-    recommendations = [
-      { level: 'EXCELLENT', text: `Loss ratio at ${lossRatio}% is well within sustainable range. Portfolio is financially healthy.` },
-      { level: 'GROWTH', text: `Total premiums KES ${premiumsCollected.toLocaleString()} with only KES ${benefitsPaid.toLocaleString()} paid out. Reserve fund is strong — consider investing surplus in T-Bills.` },
-      { level: 'EXPAND', text: `Scale marketing aggressively. Target on-board 500+ riders by Q3 with boda-boda SACCO partnerships.` },
-      { level: 'PRODUCT', text: `Introduce a Dental & Optical top-up tier at KES 50/ride to diversify revenue and increase ARPU.` },
-    ];
-  }
-
-  return { riskLevel, headline, recommendations, generatedAt: new Date().toLocaleString('en-KE') };
-}
-
-// ============================================================
 // FEATURE 1: AI CLAIM AUDITOR
 // ============================================================
 function setAdmissionMode(mode) {
@@ -308,31 +267,28 @@ function setAdmissionMode(mode) {
 }
 
 async function executeAuditLogic(doctorNote) {
-  const isLive = state.gemini.mode === 'live';
-
-  if (isLive) {
-    const systemInstruction = `You are a medical claims auditor AI for BimaFast micro-insurance in Kenya.
+  const systemInstruction = `You are a medical claims auditor AI for BimaFast micro-insurance in Kenya.
 Your task is to extract structured admission data from a raw doctor's clinical note.
 You MUST return ONLY valid JSON matching the specified schema.
 Be conservative: if data is ambiguous, prefer lower claim amounts.
 Payout rate is KES ${state.admin.payoutPerNight} per night of admission.`;
 
-    const responseSchema = {
-      type: 'object',
-      properties: {
-        patient_name: { type: 'string' },
-        diagnosis: { type: 'string' },
-        admission_nights: { type: 'integer' },
-        clinical_indicators: { type: 'array', items: { type: 'string' } },
-        claim_decision: { type: 'string', enum: ['APPROVED', 'REJECTED'] },
-        confidence_score: { type: 'number' },
-        payout_amount_kes: { type: 'integer' },
-        rejection_reason: { type: 'string', nullable: true },
-      },
-      required: ['patient_name', 'diagnosis', 'admission_nights', 'claim_decision', 'payout_amount_kes'],
-    };
+  const responseSchema = {
+    type: 'object',
+    properties: {
+      patient_name: { type: 'string' },
+      diagnosis: { type: 'string' },
+      admission_nights: { type: 'integer' },
+      clinical_indicators: { type: 'array', items: { type: 'string' } },
+      claim_decision: { type: 'string', enum: ['APPROVED', 'REJECTED'] },
+      confidence_score: { type: 'number' },
+      payout_amount_kes: { type: 'integer' },
+      rejection_reason: { type: 'string', nullable: true },
+    },
+    required: ['patient_name', 'diagnosis', 'admission_nights', 'claim_decision', 'payout_amount_kes'],
+  };
 
-    const prompt = `Parse this doctor's discharge note and extract admission details for insurance claim processing:
+  const prompt = `Parse this doctor's discharge note and extract admission details for insurance claim processing:
 
 ---
 ${doctorNote}
@@ -342,14 +298,10 @@ Payout rate: KES ${state.admin.payoutPerNight} per night.
 Extract: patient name, diagnosis, number of admitted nights, clinical evidence, and make an APPROVED or REJECTED decision.
 If nights > 14 or diagnosis is unclear, REJECT the claim.`;
 
-    const rawResponse = await callGeminiAPI(prompt, systemInstruction, responseSchema);
-    const auditResult = JSON.parse(rawResponse.trim());
-    auditResult.payout_amount_kes = auditResult.admission_nights * state.admin.payoutPerNight;
-    return auditResult;
-  } else {
-    await simulateDelay(1800);
-    return mockClaimAudit(doctorNote);
-  }
+  const rawResponse = await callGeminiAPI(prompt, systemInstruction, responseSchema);
+  const auditResult = JSON.parse(rawResponse.trim());
+  auditResult.payout_amount_kes = auditResult.admission_nights * state.admin.payoutPerNight;
+  return auditResult;
 }
 
 async function runAiAudit() {
@@ -405,9 +357,9 @@ async function runAiAudit() {
 
   } catch (err) {
     if (err.message === 'NO_API_KEY') {
-      showAdmitResult('ai-admit-result', 'error', 'No Gemini API key configured. Using Mock mode — please click "AI Settings" in the header to switch.');
+      showAdmitResult('ai-admit-result', 'error', 'No Gemini API key configured on the server. Please contact your system administrator.');
     } else {
-      showAdmitResult('ai-admit-result', 'error', `Gemini API Error: ${err.message}. Check your API key or try Mock mode.`);
+      showAdmitResult('ai-admit-result', 'error', `Gemini API Error: ${err.message}. Please contact your system administrator.`);
     }
     addEvent('ai', 'warning', `Gemini API error: ${err.message}`);
   } finally {
@@ -543,12 +495,7 @@ async function processChat(userMessage) {
   };
 
   try {
-    let response;
-    const isLive = state.gemini.mode === 'live';
-
-    if (isLive) {
-      // === LIVE GEMINI CHAT ===
-      const systemInstruction = `You are Bima Assistant, a professional micro-insurance chatbot for BimaFast — a daily micro-health-insurance platform for gig workers in Kenya (boda-boda riders, taxi drivers, delivery workers).
+    const systemInstruction = `You are Bima Assistant, a professional micro-insurance chatbot for BimaFast — a daily micro-health-insurance platform for gig workers in Kenya (boda-boda riders, taxi drivers, delivery workers).
 
 RIDER CONTEXT:
 - Name: ${riderContext.name}
@@ -568,17 +515,13 @@ INSTRUCTIONS:
 - For financial figures, always format in KES with commas
 - Max 3-4 sentences per response`;
 
-      // Convert history to native Gemini API multi-turn format (roles: 'user' and 'model')
-      const apiHistory = state.chatHistory.slice(-8).map(h => ({
-        role: h.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: h.content }]
-      }));
+    // Convert history to native Gemini API multi-turn format (roles: 'user' and 'model')
+    const apiHistory = state.chatHistory.slice(-8).map(h => ({
+      role: h.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: h.content }]
+    }));
 
-      response = await callGeminiAPI(apiHistory, systemInstruction);
-    } else {
-      await simulateDelay(900);
-      response = mockChatResponse(userMessage, riderContext);
-    }
+    const response = await callGeminiAPI(apiHistory, systemInstruction);
 
     removeTypingBubble(typingId);
     appendChatBubble('agent', response);
@@ -589,9 +532,9 @@ INSTRUCTIONS:
   } catch (err) {
     removeTypingBubble(typingId);
     if (err.message === 'NO_API_KEY') {
-      appendChatBubble('agent', 'No API key configured — running in Mock mode. Ask me anything about your coverage.');
+      appendChatBubble('agent', 'No Gemini API key is configured on the server. Please contact your system administrator.');
     } else {
-      appendChatBubble('agent', `Connection error: ${err.message}. Check your Gemini API key in AI Settings.`);
+      appendChatBubble('agent', `Connection error: ${err.message}. Please contact your system administrator.`);
     }
   }
 }
@@ -721,18 +664,13 @@ async function runRiskAnalysis() {
   addEvent('ai', 'ai', `AI Risk Advisor analyzing portfolio: ${metrics.activePolicies} policies, Loss Ratio ${metrics.lossRatio}%`);
 
   try {
-    let report;
-    const isLive = state.gemini.mode === 'live';
-
-    if (isLive) {
-      // === LIVE GEMINI RISK ANALYSIS ===
-      const systemInstruction = `You are a senior actuarial AI advisor for BimaFast, a Kenyan micro-insurance insurtech.
+    const systemInstruction = `You are a senior actuarial AI advisor for BimaFast, a Kenyan micro-insurance insurtech.
 You are analyzing a portfolio of daily micro-health insurance policies sold to gig workers (boda-boda, taxi, delivery).
 Provide strategic risk and sustainability recommendations.
 Format your response as: one headline sentence, then 4 bullet-point recommendations.
 Be specific with numbers. Use KES currency. Keep it under 200 words.`;
 
-      const prompt = `Analyze this insurance portfolio and provide risk assessment:
+    const prompt = `Analyze this insurance portfolio and provide risk assessment:
 
 PORTFOLIO METRICS:
 - Active Policies: ${metrics.activePolicies}
@@ -745,16 +683,12 @@ PORTFOLIO METRICS:
 
 Provide: risk level (LOW/MEDIUM/HIGH), a headline, and 4 strategic recommendations.`;
 
-      const rawResponse = await callGeminiAPI(prompt, systemInstruction);
-      report = { isRaw: true, content: rawResponse, generatedAt: new Date().toLocaleString('en-KE') };
-    } else {
-      await simulateDelay(1500);
-      report = mockRiskAnalysis(metrics);
-    }
+    const rawResponse = await callGeminiAPI(prompt, systemInstruction);
+    const report = { isRaw: true, content: rawResponse, generatedAt: new Date().toLocaleString('en-KE') };
 
-    renderRiskReport(report, isLive);
+    renderRiskReport(report);
     showElement('risk-report-container');
-    addEvent('ai', 'ai', `Risk analysis complete. Level: ${report.riskLevel || 'Assessed'}. Report generated.`);
+    addEvent('ai', 'ai', `Risk analysis complete. Report generated.`);
 
   } catch (err) {
     showGlobalToast(`Gemini Error: ${err.message}`, 'error');
@@ -765,27 +699,18 @@ Provide: risk level (LOW/MEDIUM/HIGH), a headline, and 4 strategic recommendatio
   }
 }
 
-function renderRiskReport(report, isLive) {
+function renderRiskReport(report) {
   const container = document.getElementById('risk-report-content');
   const modeTag = document.getElementById('risk-mode-tag');
-  modeTag.textContent = isLive ? 'LIVE' : 'MOCK';
-  modeTag.className = `audit-mode-tag ${isLive ? 'live' : ''}`;
-
-  if (report.isRaw) {
-    // Raw Gemini text response
-    container.innerHTML = `<div style="white-space:pre-wrap; font-size:0.78rem; line-height:1.8; color: var(--text-2);">${escapeHtml(report.content)}</div>
-      <div style="margin-top:0.75rem; font-size:0.65rem; color:var(--text-3);">Generated by Gemini AI · ${report.generatedAt}</div>`;
-  } else {
-    // Structured mock response
-    const levelColor = { 'HIGH': 'risk-high', 'MEDIUM': 'risk-med', 'LOW': 'risk-low' };
-    const items = report.recommendations.map(r =>
-      `<li><span class="${levelColor[r.level] || ''}">[${r.level}]</span> ${escapeHtml(r.text)}</li>`
-    ).join('');
-    container.innerHTML = `
-      <h4>${report.headline}</h4>
-      <ul>${items}</ul>
-      <div style="margin-top:0.75rem; font-size:0.65rem; color:var(--text-3);">Generated by BimaFast Mock AI Engine · ${report.generatedAt}</div>`;
+  if (modeTag) {
+    const isLive = state.gemini.mode === 'live';
+    modeTag.textContent = isLive ? 'LIVE' : 'OFFLINE';
+    modeTag.className = `audit-mode-tag ${isLive ? 'live' : ''}`;
   }
+
+  // Raw Gemini text response
+  container.innerHTML = `<div style="white-space:pre-wrap; font-size:0.78rem; line-height:1.8; color: var(--text-2);">${escapeHtml(report.content)}</div>
+    <div style="margin-top:0.75rem; font-size:0.65rem; color:var(--text-3);">Generated by Gemini AI · ${report.generatedAt}</div>`;
 }
 
 // ============================================================
@@ -1292,53 +1217,32 @@ function exportAdminReport() {
 // ============================================================
 // BOOT / INIT
 // ============================================================
-document.addEventListener('DOMContentLoaded', () => {
-  // Check for API key in URL query parameter as a fallback/easy-load method
-  const urlParams = new URLSearchParams(window.location.search);
-  const urlKey = urlParams.get('key') || urlParams.get('apikey');
-  if (urlKey && urlKey.startsWith('AIza')) {
-    state.gemini.apiKey = urlKey.trim();
-    state.gemini.mode = 'live';
-    saveState();
-  }
-  
-  // Developer preset key configuration
-  const PRESET_API_KEY = ''; // Developers can place a default key here for local testing
-  if (PRESET_API_KEY && PRESET_API_KEY.startsWith('AIza') && !state.gemini.apiKey) {
-    state.gemini.apiKey = PRESET_API_KEY;
-    state.gemini.mode = 'live';
-    saveState();
-  }
-
-  // Restore API key from state
-  if (state.gemini.apiKey) {
-    document.getElementById('api-key-input').value = state.gemini.apiKey;
-  }
-
+document.addEventListener('DOMContentLoaded', async () => {
   // Restore slider values
-  document.getElementById('premium-slider').value = state.admin.premiumRate;
-  document.getElementById('payout-slider').value = state.admin.payoutPerNight;
+  const premiumSlider = document.getElementById('premium-slider');
+  const payoutSlider = document.getElementById('payout-slider');
+  
+  if (premiumSlider) premiumSlider.value = state.admin.premiumRate;
+  if (payoutSlider) payoutSlider.value = state.admin.payoutPerNight;
 
-  // Initial render
-  renderAll();
-  renderEventStream();
+  // Initial render / Resume session
+  if (Auth.isAuthenticated()) {
+    const user = Auth.getCurrentUser();
+    updateSessionHeaderUI(user);
+    await fetchConfig();
+    await loadGeminiApiKey();
+    switchPortal(user.role);
+    renderAll();
+  } else {
+    Auth.showLoginScreen();
+  }
 
   // Log startup event if fresh
   if (!state.admin.eventStream.length) {
     addEvent('ai', 'ai', 'BimaFast system initialized. Gemini AI integration ready.');
   }
 
-  // Verify JSON parsing of mock outputs
-  try {
-    const testMock = mockClaimAudit('Patient test. 2 nights. Malaria.');
-    console.assert(typeof testMock.payout_amount_kes === 'number', 'Mock payout should be a number');
-    console.assert(['APPROVED', 'REJECTED'].includes(testMock.claim_decision), 'Mock decision valid');
-  } catch (e) {
-    console.warn('Mock engine self-test failed:', e);
-  }
-
   console.log('%cBimaFast Initialized', 'color:#6366f1;font-weight:700;font-size:14px');
-  console.log(`%cMode: ${state.gemini.mode === 'live' ? 'Live Gemini AI' : 'Mock Sandbox'}`, 'color:#94a3b8;font-size:12px');
 });
 
 // ============================================================

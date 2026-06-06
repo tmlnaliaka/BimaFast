@@ -13,12 +13,13 @@ const PORT = process.env.PORT || 3000;
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
-      defaultSrc:  ["'self'"],
-      scriptSrc:   ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      styleSrc:    ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://fonts.gstatic.com"],
-      fontSrc:     ["'self'", "https://fonts.gstatic.com"],
-      connectSrc:  ["'self'", "https://generativelanguage.googleapis.com"],
-      imgSrc:      ["'self'", "data:"],
+      defaultSrc:    ["'self'"],
+      scriptSrc:     ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      scriptSrcAttr: ["'unsafe-inline'"],
+      styleSrc:      ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://fonts.gstatic.com"],
+      fontSrc:       ["'self'", "https://fonts.gstatic.com"],
+      connectSrc:    ["'self'", "https://generativelanguage.googleapis.com"],
+      imgSrc:        ["'self'", "data:"],
     },
   },
 }));

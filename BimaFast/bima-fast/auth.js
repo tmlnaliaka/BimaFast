@@ -406,3 +406,8 @@ const Auth = (() => {
     hideLoginScreen,
   };
 })();
+
+// Auto-initialize Auth system on DOMContentLoaded
+document.addEventListener('DOMContentLoaded', () => {
+  Auth.init();
+});
