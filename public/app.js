@@ -235,22 +235,43 @@ async function callGeminiAPI(prompt, systemInstruction = '', responseSchema = nu
     } : { temperature: 0.8 },
   };
 
-  const response = await fetch(GEMINI_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(requestBody),
-  });
+  try {
+    const response = await fetch(GEMINI_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    });
 
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err?.error?.message || `HTTP ${response.status}`);
+    if (!response.ok) {
+      const errBody = await response.json().catch(() => ({}));
+      const status = response.status;
+      const message = errBody?.error?.message || `HTTP ${status}`;
+
+      // Handle quota / rate-limit errors specifically
+      if (status === 429 || String(message).toLowerCase().includes('quota') || String(message).toLowerCase().includes('rate-limit')) {
+        state.gemini.mode = 'offline';
+        updateApiStatusUI();
+        showGlobalToast('Gemini quota exceeded or rate-limited — switched to offline mode. Please add billing or provide a different API key.', 'error');
+        throw new Error('GEMINI_QUOTA_EXCEEDED: ' + message);
+      }
+
+      throw new Error(message);
+    }
+
+    const data = await response.json();
+    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!rawText) throw new Error('Empty response from Gemini');
+    return rawText;
+  } catch (err) {
+    // Network or unexpected errors
+    console.error('callGeminiAPI error:', err);
+    if (String(err.message).includes('GEMINI_QUOTA_EXCEEDED')) throw err;
+    // For other transient failures, convert to user-friendly message and fallback to offline
+    state.gemini.mode = 'offline';
+    updateApiStatusUI();
+    showGlobalToast('Gemini API error — switched to offline mode. Check API key and quota.', 'error');
+    throw err;
   }
-
-  const data = await response.json();
-  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!rawText) throw new Error('Empty response from Gemini');
-
-  return rawText;
 }
 
 // ============================================================
