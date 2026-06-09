@@ -2173,6 +2173,43 @@ select.form-input option {
   flex-direction: column;
   flex: 1;
 }
+
+/* PDF Report Styles */
+.pdf-report {
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+  color: #0f172a;
+  background: #ffffff;
+  padding: 24px;
+  box-sizing: border-box;
+  width: 210mm; /* A4 width for layout reference */
+}
+.pdf-report .report-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-bottom: 3px solid #0ea5e9;
+  padding-bottom: 12px;
+  margin-bottom: 18px;
+}
+.pdf-report .brand-logo {
+  width: 64px;
+  height: 64px;
+  background: linear-gradient(135deg,#0ea5e9,#06b6d4);
+  border-radius: 10px;
+  display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:18px;
+}
+.pdf-report h1 { margin:0; font-size:20px; color:#0f172a }
+.pdf-report .meta { color:#475569; font-size:12px; margin-top:6px }
+.pdf-report .metrics { display:flex; gap:12px; margin-top:16px; flex-wrap:wrap }
+.pdf-report .metric { background:#f8fafc;border-radius:8px;padding:10px 12px;flex:1; min-width:160px }
+.pdf-report .metric .label { font-size:11px; color:#64748b }
+.pdf-report .metric .value { font-weight:700; font-size:16px; color:#0f172a; margin-top:6px }
+.pdf-report .section { margin-top:18px }
+.pdf-report .section h3 { margin:0 0 8px 0; color:#0ea5e9; font-size:14px }
+.pdf-report table { width:100%; border-collapse:collapse; font-size:12px }
+.pdf-report table th, .pdf-report table td { text-align:left; padding:8px; border-bottom:1px solid #e6eef6 }
+.pdf-report .footer { margin-top:20px; font-size:11px; color:#64748b }
+
 .live-indicator {
   display: inline-flex;
   align-items: center;
