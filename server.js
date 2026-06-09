@@ -138,3 +138,5 @@ app.listen(PORT, () => {
     console.log('  ✓  Gemini AI key loaded (model: ' + (process.env.GEMINI_MODEL || 'gemini-2.0-flash') + ')');
   }
 });
+
+module.exports = app;

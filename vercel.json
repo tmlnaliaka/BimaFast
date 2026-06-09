@@ -5,20 +5,12 @@
     {
       "src": "server.js",
       "use": "@vercel/node"
-    },
-    {
-      "src": "bima-fast/**",
-      "use": "@vercel/static"
     }
   ],
-  "rewrites": [
+  "routes": [
     {
-      "source": "/api/(.*)",
-      "destination": "/server.js"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/bima-fast/$1"
+      "src": "/(.*)",
+      "dest": "server.js"
     }
   ]
 }
