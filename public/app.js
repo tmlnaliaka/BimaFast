@@ -137,10 +137,11 @@ let geminiApiKey = '';
 
 async function loadGeminiApiKey() {
   try {
-    const key = await Auth.fetchGeminiKey();
-    geminiApiKey = key;
-    state.gemini.apiKey = key;
-    state.gemini.mode = key ? 'live' : 'offline';
+    const info = await Auth.fetchGeminiKey();
+    const available = info && info.available;
+    geminiApiKey = '';
+    state.gemini.apiKey = '';
+    state.gemini.mode = available ? 'live' : 'offline';
   } catch (err) {
     console.warn('Could not load server-side Gemini API key:', err);
     geminiApiKey = '';
@@ -219,57 +220,43 @@ function updateChatModeBadge() {
 // GEMINI API CORE CALLER
 // ============================================================
 async function callGeminiAPI(prompt, systemInstruction = '', responseSchema = null) {
-  const keyToUse = geminiApiKey || state.gemini.apiKey;
-  if (!keyToUse) throw new Error('NO_API_KEY');
-
-  const modelToUse = state.gemini.modelName || 'gemini-2.0-flash';
-  const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${keyToUse}`;
-
-  const requestBody = {
-    systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
-    contents: Array.isArray(prompt) ? prompt : [{ role: 'user', parts: [{ text: prompt }] }],
-    generationConfig: responseSchema ? {
-      response_mime_type: 'application/json',
-      response_schema: responseSchema,
-      temperature: 0.2,
-    } : { temperature: 0.8 },
-  };
-
+  // Call server-side proxy endpoint which uses the server GEMINI_API_KEY
+  const modelToUse = state.gemini.modelName || 'gemini-2.5-flash';
   try {
-    const response = await fetch(GEMINI_URL, {
+    const response = await fetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
+      body: JSON.stringify({ prompt, systemInstruction, responseSchema, modelName: modelToUse }),
     });
 
-    if (!response.ok) {
-      const errBody = await response.json().catch(() => ({}));
-      const status = response.status;
-      const message = errBody?.error?.message || `HTTP ${status}`;
+    const text = await response.text();
 
-      // Handle quota / rate-limit errors specifically
-      if (status === 429 || String(message).toLowerCase().includes('quota') || String(message).toLowerCase().includes('rate-limit')) {
+    if (!response.ok) {
+      const message = text || `HTTP ${response.status}`;
+      if (response.status === 429 || String(message).toLowerCase().includes('quota') || String(message).toLowerCase().includes('rate-limit')) {
         state.gemini.mode = 'offline';
         updateApiStatusUI();
-        showGlobalToast('Gemini quota exceeded or rate-limited — switched to offline mode. Please add billing or provide a different API key.', 'error');
+        showGlobalToast('Gemini quota exceeded or rate-limited — switched to offline mode. Please check billing or rotate the API key.', 'error');
         throw new Error('GEMINI_QUOTA_EXCEEDED: ' + message);
       }
-
       throw new Error(message);
     }
 
-    const data = await response.json();
-    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!rawText) throw new Error('Empty response from Gemini');
-    return rawText;
+    // The proxy returns the same Gemini response body (JSON). Parse and extract text if present.
+    try {
+      const data = JSON.parse(text);
+      const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!rawText) throw new Error('Empty response from Gemini');
+      return rawText;
+    } catch (e) {
+      // If non-JSON (unexpected), return raw text
+      return text;
+    }
   } catch (err) {
-    // Network or unexpected errors
-    console.error('callGeminiAPI error:', err);
-    if (String(err.message).includes('GEMINI_QUOTA_EXCEEDED')) throw err;
-    // For other transient failures, convert to user-friendly message and fallback to offline
+    console.error('callGeminiAPI proxy error:', err);
     state.gemini.mode = 'offline';
     updateApiStatusUI();
-    showGlobalToast('Gemini API error — switched to offline mode. Check API key and quota.', 'error');
+    showGlobalToast('Gemini API error — switched to offline mode. Check server API key and billing.', 'error');
     throw err;
   }
 }
