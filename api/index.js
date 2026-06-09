@@ -28,7 +28,7 @@ app.use(express.json());
 
 // ── Static Files ───────────────────────────────────────────────────────────────
 // Serve static files from the /public directory
-app.use(express.static(path.join(__dirname, '..', 'public')));
+app.use(express.static(path.join(process.cwd(), 'public')));
 
 // ── /api/config  (safe config delivery — no secrets exposed beyond what's needed) ──
 app.get('/api/config', (req, res) => {
@@ -118,7 +118,7 @@ app.post('/api/gemini-key', (req, res) => {
 
 // ── Catch-all (SPA fallback) ──────────────────────────────────────────────────
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+  res.sendFile(path.join(process.cwd(), 'public', 'index.html'));
 });
 
 // ── Start (Only if not running on Vercel) ───────────────────────────────────────
