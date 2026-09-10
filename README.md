@@ -1,6 +1,6 @@
 # BimaFast — Embedded Daily Micro-Insurance for Gig Workers
 
-BimaFast is a modern, responsive web application designed to provide embedded daily micro-health insurance for gig economy workers (such as boda-boda riders, taxi drivers, and delivery workers) in Kenya. By integrating real-time automated claims processing, role-based portals, and Google Gemini AI, BimaFast makes daily health coverage accessible, affordable, and instant.
+BimaFast is a modern, responsive web application designed to provide embedded daily micro-health insurance for gig economy workers (such as boda-boda riders, taxi drivers, delivery workers) in Kenya. By integrating real-time automated claims processing, role-based portals, and Google Gemini AI, BimaFast makes daily health coverage accessible, affordable, and auto instant.
 
 ---
 
